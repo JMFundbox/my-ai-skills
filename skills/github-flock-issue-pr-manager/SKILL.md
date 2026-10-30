@@ -51,6 +51,8 @@ HERDR TAB TOPOLOGY:
    +---------------------------------------------------------------------+
 ```
 
+The diagram shows the Pro baselines for `imp-planner` and `code-reviewer`; the orchestration reference's complexity policy may select Advanced for clearly low-complexity work before those agents start.
+
 ### Critical: Post-Join Tab Rename Lifecycle Rule
 When a pane is adopted with `pc-tool flock adopt`, `proclaude` starts up and asynchronously executes `pc-tool flock join` 3–6 seconds later. Flock's internal `join` routine (`membership-verb.ts:690 -> labelCallerTab`) **automatically renames the Herdr tab to the member's Flock name (`m1`, `m2`, `m3`, `m4`, `m6`)**.
 - Calling `herdr tab rename` immediately after `flock adopt` creates a race condition where the tab is renamed before the child process runs `join`, causing `flock join` to overwrite the tab name seconds later.
@@ -94,8 +96,8 @@ All delegated agents are launched with `proclaude` using verified catalog aliase
 | Role | Herdr Pane Label | Flock Name | Model Launcher | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
 | **`plan-reviewer`** | `plan-reviewer` | `m1` | `proclaude --model advanced-adaai` | Adversarial plan review & acceptance criteria validation |
-| **`imp-planner`** | `imp-planner` | `m2` | `proclaude --model pro-adaai` | Minimal sufficient implementation plan generation |
-| **`code-reviewer`** | `code-reviewer` | `m3` | `proclaude --model pro-adaai` | Work decomposition, diff gating, commits, and pushes |
+| **`imp-planner`** | `imp-planner` | `m2` | `proclaude --model "$IMP_PLANNER_MODEL"` (baseline: `pro-adaai`) | Minimal sufficient implementation plan generation |
+| **`code-reviewer`** | `code-reviewer` | `m3` | `proclaude --model "$CODE_REVIEWER_MODEL"` (baseline: `pro-adaai`) | Work decomposition, diff gating, commits, and pushes |
 | **`imp-coder-1`** | `imp-coder-1` | `m4` | `proclaude --model lite-adaai` | Fast, minimal code implementation within strict write set |
 | **`imp-coder-2`** | `imp-coder-2` | *(free mN)* | `proclaude --model lite-adaai` | Optional concurrent coder for disjoint write sets |
 | **`pr-reviewer`** | `pr-reviewer` | `m5` | `proclaude --model advanced-adaai` | Formal GitHub PR review with inline line comments |
@@ -147,6 +149,9 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
      ```
 2. **Spawn Herdr Tab `planning-<issue#>`**:
    ```bash
+   # Select from issue/repository complexity using the orchestration reference; Pro is baseline.
+   IMP_PLANNER_MODEL=pro-adaai
+   # For clearly low-complexity work only, set IMP_PLANNER_MODEL=advanced-adaai.
    PLAN_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "planning-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
    PLAN_TAB_ID=$(echo "$PLAN_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
    PLAN_REV_PANE=$(echo "$PLAN_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
@@ -159,7 +164,7 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
    sleep 2
 
    herdr pane run "$PLAN_REV_PANE" "proclaude --model advanced-adaai"
-   herdr pane run "$IMP_PLAN_PANE" "proclaude --model pro-adaai"
+   herdr pane run "$IMP_PLAN_PANE" "proclaude --model ${IMP_PLANNER_MODEL}"
 
    # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
    for p in "$PLAN_REV_PANE" "$IMP_PLAN_PANE"; do
@@ -226,6 +231,9 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
 
 1. **Spawn Herdr Tab `implementation-<issue#>`**:
    ```bash
+   # Re-evaluate from the approved plan; Pro is the baseline for code-reviewer.
+   CODE_REVIEWER_MODEL=pro-adaai
+   # Use Advanced only when both the issue and approved plan are clearly low complexity.
    IMPL_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "implementation-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
    IMPL_TAB_ID=$(echo "$IMPL_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
    CODE_REV_PANE=$(echo "$IMPL_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
@@ -238,7 +246,7 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
    # Wait for shell prompt before running launcher to prevent banner race
    sleep 2
 
-   herdr pane run "$CODE_REV_PANE" "proclaude --model pro-adaai"
+   herdr pane run "$CODE_REV_PANE" "proclaude --model ${CODE_REVIEWER_MODEL}"
    herdr pane run "$CODER_1_PANE" "proclaude --model lite-adaai"
 
    # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)

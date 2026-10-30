@@ -11,18 +11,24 @@ Every delegated agent must be launched by executing `proclaude` or `procodex` ac
 - Create and label the pane first, then run proclaude or procodex with `herdr pane run`.
 - Fail closed if proclaude or procodex is unavailable; never substitute direct Claude Code or Codex.
 
-Required profiles (all verified against the ProClaude model catalog):
+Default profiles (verify aliases with `proclaude --list-models` before launch):
 
-| Agent | Launcher |
-|---|---|
-| `imp-planner` | `proclaude --model pro-adaai` |
-| `plan-reviewer` | `proclaude --model advanced-adaai` |
-| `code-reviewer` | `proclaude --model pro-adaai` |
-| `imp-coder-1` through `imp-coder-3` | `proclaude --model lite-adaai` |
-| `pr-reviewer` | `proclaude --model advanced-adaai` |
-| `e2e-tester` | `proclaude --model lite-adaai` |
+| Agent | Launcher | Default/baseline |
+|---|---|---|
+| `imp-planner` | `proclaude --model "$IMP_PLANNER_MODEL"` | `pro-adaai` |
+| `plan-reviewer` | `proclaude --model advanced-adaai` | `advanced-adaai` |
+| `code-reviewer` | `proclaude --model "$CODE_REVIEWER_MODEL"` | `pro-adaai` |
+| `imp-coder-1` through `imp-coder-3` | `proclaude --model lite-adaai` | `lite-adaai` |
+| `pr-reviewer` | `proclaude --model advanced-adaai` | `advanced-adaai` |
+| `e2e-tester` | `proclaude --model lite-adaai` | `lite-adaai` |
 
-`pro-adaai` is AdaAI Pro (Complex); it features always-on thinking (do not pass `--effort`). `advanced-adaai` is AdaAI Advanced (Challenging); it features always-on thinking (do not pass `--effort`). `lite-adaai` is AdaAI Lite; it features always-on thinking (do not pass `--effort`) and was the fastest available route on the implementation benchmark while meeting its correctness criteria. Do not substitute other model aliases without re-verifying them in the catalog (`~/.adaai/state/catalog-cache.json` or `~/.proxy-claude/state/catalog-cache.json`) and with a smoke test.
+### Complexity-based model selection for the planner and code reviewer
+
+`pro-adaai` is the requested baseline for both `imp-planner` and `code-reviewer`. Classify the work from the issue, repository evidence, and (for `code-reviewer`) the approved plan before launching the agent. Use `advanced-adaai` only for a clearly low-complexity task: a localized, well-understood change with straightforward acceptance criteria and no security, authorization, data-integrity, migration, concurrency, financial, API-compatibility, or cross-service implications. Use the `pro-adaai` baseline for medium/high complexity, any high-impact work, and whenever complexity is uncertain. If scope or risk increases before `code-reviewer` starts, retain Pro. Do not switch a persistent agent's model mid-session; choose before launch. Keep all other agent profiles unchanged.
+
+Benchmark snapshot (2026-10-31, this machine): `proclaude --list-models` exposed `copilot-gpt-4.1`, `copilot-gpt-5.4-nano`, `copilot-search-a`, `lite-adaai`, `plus-adaai`, `advanced-adaai`, and `pro-adaai`. One identical no-tool prompt covered small, medium, and complex plans plus a role-authorization diff review. `advanced-adaai` completed in 9s (reported `$0.0314`) and produced a sound plan and caught the self-role escalation; `copilot-gpt-5.4-nano` completed in 10s (`$0.0466`) and caught the same issue, though its complex plan was less thorough. `pro-adaai` and `plus-adaai` returned no usable answer after reporting budget exhaustion (reported `$0.1793` and `$0.1058`, respectively, despite a `$0.10` CLI budget); `lite-adaai`, `copilot-gpt-4.1`, and `copilot-search-a` timed out at 45s without a usable result. Treat these as single-run observations, not a model leaderboard or proof of quality/cost; the budget setting did not act as a hard spend cap. Do not make further benchmark calls without an explicit spend limit. The incomplete runs are inconclusive, not evidence of poor model quality.
+
+`pro-adaai` is AdaAI Pro (Complex), `advanced-adaai` is AdaAI Advanced (Challenging), and `lite-adaai` is AdaAI Lite. These profiles use always-on thinking; do not pass `--effort`. Do not invent or substitute aliases: re-verify them in `proclaude --list-models` (or the catalog at `~/.adaai/state/catalog-cache.json` / `~/.proxy-claude/state/catalog-cache.json`) before launch. If the selected `advanced-adaai` alias is unavailable, fall back to the `pro-adaai` baseline; if the baseline itself is unavailable, stop and report the blocker rather than switching launchers.
 
 For every agent: create its pane with the correct cwd and `--no-focus`; parse the pane ID from JSON; label it with `herdr pane rename <pane-id> <agent-name>`; wait for the interactive shell prompt (sleep 2) to prevent login banner input drops; run the exact proclaude or procodex command with `herdr pane run`; wait for an agent to occupy the pane (at most 15 checks, 2s apart, reading `herdr agent list` for that pane); assign the matching Herdr agent name with `herdr agent rename <pane-id> <agent-name>`; inspect `herdr pane process-info <pane-id>` to verify the ProClaude/procodex wrapper started before sending tasks. A bare Claude Code or Codex process is acceptable only when proclaude/procodex startup is evidenced.
 
@@ -161,7 +167,7 @@ herdr pane rename "$PLAN_PLANNER_PANE_ID" "imp-planner"
 sleep 2
 
 herdr pane run "$PLAN_REVIEWER_PANE_ID" "proclaude --model advanced-adaai"
-herdr pane run "$PLAN_PLANNER_PANE_ID" "proclaude --model pro-adaai"
+herdr pane run "$PLAN_PLANNER_PANE_ID" "proclaude --model ${IMP_PLANNER_MODEL}"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
 for p in "$PLAN_REVIEWER_PANE_ID" "$PLAN_PLANNER_PANE_ID"; do
@@ -233,7 +239,7 @@ herdr pane rename "$CODER_1_PANE_ID" "imp-coder-1"
 # Wait for interactive shell prompt before running launcher
 sleep 2
 
-herdr pane run "$CODE_REVIEWER_PANE_ID" "proclaude --model pro-adaai"
+herdr pane run "$CODE_REVIEWER_PANE_ID" "proclaude --model ${CODE_REVIEWER_MODEL}"
 herdr pane run "$CODER_1_PANE_ID" "proclaude --model lite-adaai"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)

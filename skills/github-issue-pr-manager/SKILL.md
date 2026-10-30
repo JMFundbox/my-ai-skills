@@ -51,6 +51,8 @@ Every Herdr tab spawned by this workflow (`planning-<issue#>`, `implementation-<
 
 ### Stage 1. Planning
 
+Before spawning agents, select `IMP_PLANNER_MODEL` using the complexity policy in [references/orchestration.md](references/orchestration.md). Set `IMP_PLANNER_MODEL=pro-adaai` as the baseline; set it to `advanced-adaai` only for a clearly low-complexity task. Verify the selected alias with `proclaude --list-models` and fall back to the Pro baseline if Advanced is unavailable.
+
 Record parent pane ID for Stage 3 splitting:
 ```bash
 PARENT_PANE_ID="${HERDR_PANE_ID}"
@@ -70,7 +72,7 @@ herdr pane rename "$IMP_PLAN_PANE" "imp-planner"
 sleep 2
 
 herdr pane run "$PLAN_REV_PANE" "proclaude --model advanced-adaai"
-herdr pane run "$IMP_PLAN_PANE" "proclaude --model pro-adaai"
+herdr pane run "$IMP_PLAN_PANE" "proclaude --model ${IMP_PLANNER_MODEL}"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
 for p in "$PLAN_REV_PANE" "$IMP_PLAN_PANE"; do
@@ -108,6 +110,8 @@ Do not begin implementation before the approved plan is posted.
 
 ### Stage 2. Implementation
 
+Before spawning `code-reviewer`, choose `CODE_REVIEWER_MODEL` from the approved plan and repository evidence using the same complexity policy. Set `CODE_REVIEWER_MODEL=pro-adaai` by default; use `advanced-adaai` only when both the issue and approved plan are clearly low-complexity. Verify the selected alias before launch. Do not change a persistent agent's model mid-session.
+
 Spawn Herdr tab `implementation-<issue#>` inside the current workspace:
 ```bash
 IMPL_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "implementation-${ISSUE_NUMBER}" --no-focus)
@@ -121,7 +125,7 @@ herdr pane rename "$CODER_1_PANE_ID" "imp-coder-1"
 # Wait for interactive shell prompt before running launcher
 sleep 2
 
-herdr pane run "$CODE_REVIEWER_PANE_ID" "proclaude --model pro-adaai"
+herdr pane run "$CODE_REVIEWER_PANE_ID" "proclaude --model ${CODE_REVIEWER_MODEL}"
 herdr pane run "$CODER_1_PANE_ID" "proclaude --model lite-adaai"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)

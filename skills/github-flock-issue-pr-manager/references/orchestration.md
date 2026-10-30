@@ -46,6 +46,8 @@ HERDR TAB TOPOLOGY:
    +---------------------------------------------------------------------+
 ```
 
+The topology diagram shows the Pro baseline for `imp-planner` and `code-reviewer`; for clearly low-complexity work, the policy below may select Advanced before those agents start.
+
 ### Strict Workspace Confinement Rule
 Every Herdr tab spawned by this workflow (`planning-<issue#>`, `implementation-<issue#>`, `e2e-<issue#>`) MUST be explicitly bound to the current workspace by passing `--workspace "$HERDR_WORKSPACE_ID"` to `herdr tab create`. Never invoke `herdr tab create` without `--workspace "$HERDR_WORKSPACE_ID"`. Omitting `--workspace` causes Herdr to create the tab in whichever workspace is currently active/focused on the server, which leaks sub-issue tabs into parent epic manager workspaces or unrelated workspaces. Always pass `--workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD"`.
 
@@ -53,19 +55,25 @@ Every Herdr tab spawned by this workflow (`planning-<issue#>`, `implementation-<
 
 ## 2. Model Routing & Launcher Profiles
 
-Launch every delegated agent with `proclaude` using verified catalog aliases:
+Launch every delegated agent with `proclaude` using aliases verified by `proclaude --list-models`:
 
-| Role | Herdr Pane Label | Flock Name | Model Launcher | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| `plan-reviewer` | `plan-reviewer` | `m1` | `proclaude --model advanced-adaai` | Adversarial plan review & acceptance criteria validation |
-| `imp-planner` | `imp-planner` | `m2` | `proclaude --model pro-adaai` | Minimal sufficient implementation plan generation |
-| `code-reviewer` | `code-reviewer` | `m3` | `proclaude --model pro-adaai` | Work decomposition, diff gating, commits, and pushes |
-| `imp-coder-1` | `imp-coder-1` | `m4` | `proclaude --model lite-adaai` | Fast, minimal code implementation within strict write set |
-| `imp-coder-2` | `imp-coder-2` | *(free mN)* | `proclaude --model lite-adaai` | Optional concurrent coder for disjoint write sets |
-| `pr-reviewer` | `pr-reviewer` | `m5` | `proclaude --model advanced-adaai` | Formal GitHub PR review with inline line comments |
-| `e2e-tester` | `e2e-tester` | `m6` | `proclaude --model lite-adaai` | End-to-end and integration test discovery & execution |
+| Role | Herdr Pane Label | Flock Name | Model Launcher | Default/baseline | Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `plan-reviewer` | `plan-reviewer` | `m1` | `proclaude --model advanced-adaai` | `advanced-adaai` | Adversarial plan review & acceptance criteria validation |
+| `imp-planner` | `imp-planner` | `m2` | `proclaude --model "$IMP_PLANNER_MODEL"` | `pro-adaai` | Minimal sufficient implementation plan generation |
+| `code-reviewer` | `code-reviewer` | `m3` | `proclaude --model "$CODE_REVIEWER_MODEL"` | `pro-adaai` | Work decomposition, diff gating, commits, and pushes |
+| `imp-coder-1` | `imp-coder-1` | `m4` | `proclaude --model lite-adaai` | `lite-adaai` | Fast, minimal code implementation within strict write set |
+| `imp-coder-2` | `imp-coder-2` | *(free mN)* | `proclaude --model lite-adaai` | `lite-adaai` | Optional concurrent coder for disjoint write sets |
+| `pr-reviewer` | `pr-reviewer` | `m5` | `proclaude --model advanced-adaai` | `advanced-adaai` | Formal GitHub PR review with inline line comments |
+| `e2e-tester` | `e2e-tester` | `m6` | `proclaude --model lite-adaai` | `lite-adaai` | End-to-end and integration test discovery & execution |
 
-`lite-adaai` uses always-on thinking; do not pass `--effort`. It is the implementation-worker choice because it was the fastest available route in the benchmark while meeting the coding task's acceptance criteria.
+### Complexity-based model selection for `imp-planner` and `code-reviewer`
+
+`pro-adaai` is the requested baseline for both roles. Classify work from the issue and repository evidence; classify `code-reviewer` again from the approved plan before launch. Use `advanced-adaai` only for clearly low-complexity work: a localized, well-understood change with straightforward acceptance criteria and no security, authorization, data-integrity, migration, concurrency, financial, API-compatibility, or cross-service implications. Use the Pro baseline for medium/high complexity, any high-impact work, or uncertainty. If scope or risk increases before `code-reviewer` starts, retain Pro. Do not change a persistent agent's model mid-session. Keep every other role's model profile unchanged.
+
+Benchmark snapshot (2026-10-31, this machine): `proclaude --list-models` exposed `copilot-gpt-4.1`, `copilot-gpt-5.4-nano`, `copilot-search-a`, `lite-adaai`, `plus-adaai`, `advanced-adaai`, and `pro-adaai`. One identical no-tool prompt covered small, medium, and complex plans plus a role-authorization diff review. `advanced-adaai` completed in 9s (reported `$0.0314`) and produced a sound plan and caught the self-role escalation; `copilot-gpt-5.4-nano` completed in 10s (`$0.0466`) and caught the same issue, though its complex plan was less thorough. `pro-adaai` and `plus-adaai` returned no usable answer after reporting budget exhaustion (reported `$0.1793` and `$0.1058`, respectively, despite a `$0.10` CLI budget); `lite-adaai`, `copilot-gpt-4.1`, and `copilot-search-a` timed out at 45s without a usable result. These are single-run observations, not a leaderboard; the budget setting did not act as a hard spend cap, so do not make further benchmark calls without explicit spend approval. Incomplete runs are inconclusive, not evidence of poor quality. This benchmark did not evaluate coder/E2E fitness; keep their current profiles unchanged.
+
+The AdaAI profiles use always-on thinking; do not pass `--effort`. Do not invent or substitute aliases: verify the selected alias with `proclaude --list-models`. If the selected `advanced-adaai` alias is unavailable, use the Pro baseline; if the Pro baseline itself is unavailable, stop and report the blocker rather than switching launchers.
 
 ---
 
@@ -141,7 +149,10 @@ pc-tool flock wait
 
 Spawn Herdr tab `planning-<issue#>` inside the current workspace:
 ```bash
-PLAN_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "planning-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
+# Select from issue/repository complexity using section 2; Pro is the baseline.
+   IMP_PLANNER_MODEL=pro-adaai
+   # For clearly low-complexity work only, set IMP_PLANNER_MODEL=advanced-adaai.
+   PLAN_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "planning-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
 PLAN_TAB_ID=$(echo "$PLAN_TAB_JSON" | jq -r '.result.tab_id // .result.tab.tab_id')
 PLAN_REV_PANE=$(echo "$PLAN_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
 IMP_PLAN_PANE=$(herdr pane split "$PLAN_REV_PANE" --direction right --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus | jq -r '.result.pane_id // .result.pane.pane_id')
@@ -153,7 +164,7 @@ herdr pane rename "$IMP_PLAN_PANE" "imp-planner"
 sleep 2
 
 herdr pane run "$PLAN_REV_PANE" "proclaude --model advanced-adaai"
-herdr pane run "$IMP_PLAN_PANE" "proclaude --model pro-adaai"
+herdr pane run "$IMP_PLAN_PANE" "proclaude --model ${IMP_PLANNER_MODEL}"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
 for p in "$PLAN_REV_PANE" "$IMP_PLAN_PANE"; do
@@ -230,7 +241,10 @@ pc-tool flock send --to m1 --kind assign --review --ref "#${ISSUE_NUMBER}" \
 ### 1. Tab & Pane Setup
 Spawn Herdr tab `implementation-<issue#>`:
 ```bash
-IMPL_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "implementation-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
+# Re-evaluate from the approved plan; Pro is the baseline for code-reviewer.
+   CODE_REVIEWER_MODEL=pro-adaai
+   # Use Advanced only when both the issue and approved plan are clearly low complexity.
+   IMPL_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "implementation-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
 IMPL_TAB_ID=$(echo "$IMPL_TAB_JSON" | jq -r '.result.tab_id // .result.tab.tab_id')
 CODE_REV_PANE=$(echo "$IMPL_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
 # Split right from code-reviewer to establish the right column for coders
@@ -242,7 +256,7 @@ herdr pane rename "$CODER_1_PANE" "imp-coder-1"
 # Wait for interactive shell prompt before running launcher to prevent banner race
 sleep 2
 
-herdr pane run "$CODE_REV_PANE" "proclaude --model pro-adaai"
+herdr pane run "$CODE_REV_PANE" "proclaude --model ${CODE_REVIEWER_MODEL}"
 herdr pane run "$CODER_1_PANE" "proclaude --model lite-adaai"
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
