@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue PR Manager"
+  short_description: "Manage an issue through a reviewed, CI-green PR"
+  default_prompt: "Use /github-issue-pr-manager to complete GitHub issue #275 with supervised proclaude and procodex agents, adaptive review and CI prioritization, repeatable implementation workers, formal PR comments, and passing CI."

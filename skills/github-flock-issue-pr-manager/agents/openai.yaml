@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue PR Manager (Flock-Powered)"
+  short_description: "Manage a GitHub issue through planning, implementation, review, and CI via Flock team coordination"
+  default_prompt: "Use /github-flock-issue-pr-manager to complete GitHub issue #<number> with a specialized Flock team, model routing across Opus/Gemini/MiniMax, non-blocking turn coordination, formal reviews, and passing CI."

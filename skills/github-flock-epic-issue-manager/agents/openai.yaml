@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Epic Issue Manager (Flock-Powered)"
+  short_description: "Manage a GitHub epic issue using Herdr worktrees and flock-powered issue-pr sub-managers"
+  default_prompt: "Use /github-flock-epic-issue-manager to manage the epic issue. Ensures a clean worktree, renames the epic branch appropriately, drafts an Epic PR targeting main, dispatches code-change sub-issues to Herdr worktrees running /github-flock-issue-pr-manager targeting the epic branch with Advanced AdaAI without implementing sub-issues manually, leaves sub-issue CI/wpci monitoring entirely to child agents, merges sub-issue PRs into the epic branch once marked ready, syncs only the epic worktree (keeping main unaltered), closes finished sub-issue worktrees, and executes the final Epic PR Stage with a specialized Flock validation team."
