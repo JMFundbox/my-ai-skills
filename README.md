@@ -13,6 +13,10 @@ Skill packages live under [`skills/`](skills/). Keep package support files such 
 
 ## Install on another machine
 
+Both Claude Code (`proclaude`) and Codex (`procodex`) discover user-level skills in a `skills/` directory under their config folder: `~/.claude/skills/` and `~/.codex/skills/` respectively. Each package is self-contained, so installing a skill means placing its directory under the target harness's skills directory.
+
+### Claude Code (proclaude)
+
 The following installs the skills for your Claude Code user account on macOS or Linux. It uses symlinks, so pulling updates in the clone updates the installed skills too.
 
 ```sh
@@ -30,7 +34,49 @@ do
 done
 ```
 
-If you already have a skill with one of these names in `~/.claude/skills`, back it up or move it out of the way before linking; the commands intentionally do not overwrite existing entries. If you prefer independent copies, copy the four directories from `skills/` into `~/.claude/skills/` instead. On Windows, place those directories under `%USERPROFILE%\.claude\skills\`.
+If you already have a skill with one of these names in `~/.claude/skills`, back it up or move it out of the way before linking; the commands intentionally do not overwrite existing entries.
+
+### Codex (procodex)
+
+The equivalent install for Codex user-level skills targets `~/.codex/skills/`:
+
+```sh
+mkdir -p "$HOME/src"
+git clone https://github.com/JMFundbox/my-ai-skills.git "$HOME/src/my-ai-skills"
+mkdir -p "$HOME/.codex/skills"
+repo="$HOME/src/my-ai-skills"
+for skill in \
+  github-issue-pr-manager \
+  github-epic-issue-manager \
+  github-flock-issue-pr-manager \
+  github-flock-epic-issue-manager
+do
+  ln -s "$repo/skills/$skill" "$HOME/.codex/skills/$skill"
+done
+```
+
+Move any existing entry with the same name out of the way first; these commands also do not overwrite existing entries. To install both harnesses at once, repeat the loop with each skills directory.
+
+### Windows
+
+Symlinks require Developer Mode or an elevated shell. On Windows, copy the four directories from `skills/` into `%USERPROFILE%\.claude\skills\` and `%USERPROFILE%\.codex\skills\` instead:
+
+```sh
+repo="/path/to/my-ai-skills"
+for skill in \
+  github-issue-pr-manager \
+  github-epic-issue-manager \
+  github-flock-issue-pr-manager \
+  github-flock-epic-issue-manager
+do
+  for target in "$HOME/.claude/skills" "$HOME/.codex/skills"; do
+    mkdir -p "$target"
+    cp -R "$repo/skills/$skill" "$target/$skill"
+  done
+done
+```
+
+Copy-based installs are snapshots: re-copy the directories after pulling to pick up updates.
 
 To update a symlink-based install later:
 
