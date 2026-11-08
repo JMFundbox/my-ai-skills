@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Repo Manager"
+  short_description: "Dispatch GitHub issues and epics to Herdr worktree manager agents, monitor their PRs, and consolidate merging"
+  default_prompt: "Use /github-repo-manager to run a repo-level manager. Wait for my request to dispatch open GitHub issues or epics; for each, create a Herdr worktree from the current or specified branch with an appropriate branch name, name the initial tab admin-<number> and the initial agent pane manager-<number>, start proclaude with advanced-adaai, and dispatch /goal using /github-issue-pr-manager (issue) or /github-epic-issue-manager (epic). Monitor the agents and PRs, merge mergeable PRs one at a time using the repo's allowed or my chosen merge method, and notify agents whose PR target branch has diverged. Never implement, bypass branch protection, or answer an agent's permission prompts."

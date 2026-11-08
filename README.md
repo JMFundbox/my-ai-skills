@@ -8,6 +8,8 @@ A personal collection and working space for agentic coding skills. Each package 
 - `github-epic-issue-manager` — coordinates implementation across an epic and its sub-issues.
 - `github-flock-issue-pr-manager` — Flock-coordinated issue-to-PR workflow.
 - `github-flock-epic-issue-manager` — Flock-coordinated epic workflow.
+- `github-repo-manager` — repo-level dispatcher: creates a Herdr worktree and manager agent per issue/epic, monitors their PRs, and consolidates merging.
+- `github-flock-repo-manager` — Flock counterpart of `github-repo-manager`; dispatches the Flock issue and epic managers.
 
 Skill packages live under [`skills/`](skills/). Keep package support files such as `references/` and `agents/` alongside each `SKILL.md`.
 
@@ -28,7 +30,9 @@ for skill in \
   github-issue-pr-manager \
   github-epic-issue-manager \
   github-flock-issue-pr-manager \
-  github-flock-epic-issue-manager
+  github-flock-epic-issue-manager \
+  github-repo-manager \
+  github-flock-repo-manager
 do
   ln -s "$repo/skills/$skill" "$HOME/.claude/skills/$skill"
 done
@@ -49,7 +53,9 @@ for skill in \
   github-issue-pr-manager \
   github-epic-issue-manager \
   github-flock-issue-pr-manager \
-  github-flock-epic-issue-manager
+  github-flock-epic-issue-manager \
+  github-repo-manager \
+  github-flock-repo-manager
 do
   ln -s "$repo/skills/$skill" "$HOME/.codex/skills/$skill"
 done
@@ -59,7 +65,7 @@ Move any existing entry with the same name out of the way first; these commands 
 
 ### Windows
 
-Symlinks require Developer Mode or an elevated shell. On Windows, copy the four directories from `skills/` into `%USERPROFILE%\.claude\skills\` and `%USERPROFILE%\.codex\skills\` instead:
+Symlinks require Developer Mode or an elevated shell. On Windows, copy the skill directories from `skills/` into `%USERPROFILE%\.claude\skills\` and `%USERPROFILE%\.codex\skills\` instead:
 
 ```sh
 repo="/path/to/my-ai-skills"
@@ -67,7 +73,9 @@ for skill in \
   github-issue-pr-manager \
   github-epic-issue-manager \
   github-flock-issue-pr-manager \
-  github-flock-epic-issue-manager
+  github-flock-epic-issue-manager \
+  github-repo-manager \
+  github-flock-repo-manager
 do
   for target in "$HOME/.claude/skills" "$HOME/.codex/skills"; do
     mkdir -p "$target"
