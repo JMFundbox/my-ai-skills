@@ -206,9 +206,22 @@ Run your post-validation origin/<BASE> rebase gate now: fetch origin/<BASE>, reb
 
 Reminder (once, if the agent went idle on the same head): same text prefixed with `Reminder:` and a request to state what is blocking.
 
-## 8. Cleanup (opt-in)
+## 8. Post-merge sync and cleanup
+
+Run after every merged PR (also when someone else merged it): sync the base branch first, then remove the merged dispatch's worktree. A standing "keep merged worktrees" instruction skips the removal; a dirty worktree is never removed without the user.
 
 ```bash
+# Fast-forward the manager's checkout to the merged base. Never rebase/merge/reset.
+sync_base() {  # <base>
+  git fetch origin "$1" --quiet || return 1
+  if [ "$(git branch --show-current)" = "$1" ]; then
+    git pull --ff-only origin "$1"
+  else
+    git fetch origin "$1:$1" 2>/dev/null \
+      || echo "NOTE: local $1 left alone (cannot fast-forward, or checked out in another worktree)."
+  fi
+}
+
 cleanup_dispatch() {  # <workspace-id> <worktree-path> <pr-number>
   [ "$(gh pr view "$3" --json state -q .state)" = MERGED ] || { echo "PR not merged; not removing."; return 1; }
   [ -z "$(git -C "$2" status --porcelain)" ] || { echo "Worktree dirty; not removing."; return 1; }
@@ -216,12 +229,12 @@ cleanup_dispatch() {  # <workspace-id> <worktree-path> <pr-number>
 }
 ```
 
-Removal discards the retained `planning-<N>`, `implementation-<N>`, and `e2e-<N>` tabs of the worktree. Warn the user before the first removal in a session.
+Removal discards the retained `planning-<N>`, `implementation-<N>`, and `e2e-<N>` tabs of the worktree and ends `manager-<N>`; say so in the merge report.
 
 ## 9. Topology produced
 
 ```text
-Primary checkout (repo manager, any branch, never modified)
+Primary checkout (repo manager, any branch; only changed by the post-merge base sync)
  └─ Herdr worktree workspace per dispatch (base: origin/<base>)
      ├─ branch:  issue-<N>-<slug>  |  epic-<N>-<slug>
      ├─ tab:     admin-<N>          (initial tab)

@@ -1,11 +1,11 @@
 ---
 name: github-repo-manager
-description: Run a long-lived repo-level manager that waits for the user to ask for GitHub issues or epics to be worked, then creates a Herdr worktree per issue/epic, launches a ProClaude manager agent in it with /goal (/github-issue-pr-manager for issues, /github-epic-issue-manager for epics), monitors those agents and their PRs, and consolidates merging — merging each mergeable PR serially, or telling the agent that its PR's target branch has diverged. Use when the user wants to dispatch, track, or merge several issue/epic PRs from one place; not for working a single issue yourself.
+description: Run a long-lived repo-level manager that waits for the user to ask for GitHub issues or epics to be worked, then creates a Herdr worktree per issue/epic, launches a ProClaude manager agent in it with /goal (/github-issue-pr-manager for issues, /github-epic-issue-manager for epics), monitors those agents and their PRs, and consolidates merging — merging each mergeable PR serially, or telling the agent that its PR's target branch has diverged — then fast-forwarding the base branch in the main checkout and removing the merged dispatch's worktree. Use when the user wants to dispatch, track, or merge several issue/epic PRs from one place; not for working a single issue yourself.
 ---
 
 # GitHub Repo Manager
 
-A repo-level dispatcher and merge coordinator. It does not implement anything. It turns "work issue #12 and epic #20" into isolated Herdr worktrees with a manager agent in each, watches them, and merges their PRs one at a time when they are genuinely mergeable.
+A repo-level dispatcher and merge coordinator. It does not implement anything. It turns "work issue #12 and epic #20" into isolated Herdr worktrees with a manager agent in each, watches them, merges their PRs one at a time when they are genuinely mergeable, then syncs the base branch and cleans up the merged worktree.
 
 This workflow requires Herdr. Read the user-level `herdr` skill, then read [references/orchestration.md](references/orchestration.md) for the command patterns before creating worktrees or prompting agents. If `HERDR_ENV` is not `1`, say so and stop. Read only the reference sections needed for the current step.
 
@@ -18,7 +18,7 @@ The repo manager owns: intake, worktree/tab/pane/agent setup, dispatch prompts, 
 It must not:
 
 - Edit, commit, push, rebase, or run tests in any dispatched worktree, or `cd` into one to do work. Interact with dispatches only through `herdr` commands and `gh`.
-- Check out, commit to, pull into, or otherwise alter the checkout it runs in. `git fetch` is allowed. The base branch is only ever changed by merging a PR on GitHub.
+- Check out, commit to, push, or otherwise alter the checkout it runs in. `git fetch` is allowed, and after a merge the local base branch may be fast-forwarded only as described in "After a merge". The base branch's content is only ever changed by merging a PR on GitHub.
 - Merge with `--admin`, bypass branch protection or a merge queue, or force a merge past a failing required check or unresolved review.
 - Answer a `blocked` agent's permission or trust prompt on the user's behalf. Surface the prompt and ask.
 - Close issues, delete branches, or remove worktrees except as stated in "After a merge".
@@ -34,6 +34,7 @@ Resolve these once per session; the user can override any of them in a request.
 - **Base branch:** user-specified, else the current branch of the checkout the manager runs in. It must exist on `origin`.
 - **Merge method:** user-specified, else the only method the repo allows, else ask the user once and remember the answer for the session. `gh pr merge` has no usable non-interactive default, so never guess.
 - **Merge mode:** `auto` (default — merge as soon as gates pass) or `confirm` (report merge-ready PRs and wait for the user). Switch when the user says "ask before merging" / "hold merges".
+- **Cleanup after merge:** on by default — remove a dispatch's worktree once its PR is merged and the worktree is clean. A standing "keep merged worktrees" instruction switches it off; a dirty worktree is never removed without the user.
 
 ## Start
 
@@ -136,12 +137,13 @@ Record `(headSha, baseSha)`. Do not resend until the head changes. If the agent 
 
 1. Verify with `gh pr view <n> --json state,mergedAt,mergeCommit`.
 2. Report the PR, merge commit, and whether the issue closed. Closing keywords only auto-close for the default branch, so an issue merged into a non-default base legitimately stays open; report it, don't close it.
-3. Immediately re-run the merge gate for the other ready PRs that share the merged base. Each one now fails the divergence check and gets a notice. This is the main consolidation loop.
-4. Cleanup is opt-in. Ask the user once whether to remove merged worktrees (or follow a standing "clean up after merge" instruction). Before removing, require the PR merged, the worktree clean (`git -C <path> status --porcelain` empty), and warn that removal discards the retained `planning-`/`implementation-`/`e2e-` tabs kept for provenance. Then `herdr worktree remove --workspace <id> --force --json`.
+3. Sync the main checkout: fetch and fast-forward the local base branch to `origin/<base>` — `git pull --ff-only origin <base>` if the manager's checkout is on `<base>`, else `git fetch origin <base>:<base>`. Never rebase, merge, reset, or check out to sync. If the local branch cannot fast-forward (diverged, or checked out in another worktree), report it and leave it alone.
+4. Immediately re-run the merge gate for the other ready PRs that share the merged base. Each one now fails the divergence check and gets a notice. This is the main consolidation loop.
+5. Remove the merged dispatch's worktree (default; skipped if the user opted out with a standing "keep merged worktrees" instruction). Require the PR merged and the worktree clean (`git -C <path> status --porcelain` empty); if it is dirty, leave it and tell the user. Then `herdr worktree remove --workspace <id> --force --json`. Removal also ends `manager-<N>` and discards the retained `planning-`/`implementation-`/`e2e-` tabs — say so in the report.
 
 ## Reporting
 
-For a merged PR, report: kind and number, PR URL, merge method, merge commit, base, and whether the issue closed. For a status request, print one table: `#`, kind, base, agent state, PR (number + draft/ready), merge status, last action.
+For a merged PR, report: kind and number, PR URL, merge method, merge commit, base, whether the issue closed, the base-sync result, and whether the worktree was removed (or left, and why). For a status request, print one table: `#`, kind, base, agent state, PR (number + draft/ready), merge status, last action.
 
 If the user says to stop, stop monitoring and leave all worktrees and agents running; say which are still active.
 

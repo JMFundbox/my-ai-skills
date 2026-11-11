@@ -8,7 +8,7 @@ A personal collection and working space for agentic coding skills. Each package 
 - `github-epic-issue-manager` — coordinates implementation across an epic and its sub-issues.
 - `github-flock-issue-pr-manager` — Flock-coordinated issue-to-PR workflow.
 - `github-flock-epic-issue-manager` — Flock-coordinated epic workflow.
-- `github-repo-manager` — repo-level dispatcher: creates a Herdr worktree and manager agent per issue/epic, monitors their PRs, and consolidates merging.
+- `github-repo-manager` — repo-level dispatcher: creates a Herdr worktree and manager agent per issue/epic, monitors their PRs, consolidates merging, then syncs the base branch and removes the merged worktree.
 - `github-flock-repo-manager` — Flock counterpart of `github-repo-manager`; dispatches the Flock issue and epic managers.
 
 Skill packages live under [`skills/`](skills/). Keep package support files such as `references/` and `agents/` alongside each `SKILL.md`.
