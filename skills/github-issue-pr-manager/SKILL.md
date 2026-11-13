@@ -162,26 +162,34 @@ Do not force a full local test suite; CI is authoritative for full validation. H
 
 ### Stage 3. PR review, E2E testing, and CI
 
-In the main issue-manager tab, keep the manager on the full-height left and spawn `pr-reviewer` in a pane to the right. Concurrently, spawn a dedicated Herdr tab `e2e-<issue#>` inside the current workspace:
+Before creating any E2E tab or agent, the manager performs the E2E discovery and per-head decision in [references/orchestration.md](references/orchestration.md#e2e-discovery-gate). Set `E2E_PRESENT=1` only when a repository E2E/system integration suite or command is identified; set `E2E_PRESENT=0` only after confirming none exists. Record the evidence and head SHA. If absent, record E2E as skipped and do not create, launch, wait for, or supervise an E2E tab or agent. This does not skip PR review or required CI.
+
+In the main issue-manager tab, keep the manager on the full-height left and spawn `pr-reviewer` in a pane to the right. Only if `E2E_PRESENT=1`, also spawn a dedicated Herdr tab `e2e-<issue#>` inside the current workspace:
 ```bash
 # Main tab: split right for pr-reviewer
 PR_REV_PANE=$(herdr pane split "$PARENT_PANE_ID" --direction right --no-focus | jq -r '.result.pane_id // .result.pane.pane_id')
 herdr pane rename "$PR_REV_PANE" "pr-reviewer"
 
-# Dedicated tab: e2e-<issue#>
-E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --no-focus)
-E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
-E2E_PANE_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
-herdr pane rename "$E2E_PANE_ID" "e2e-tester"
+# Dedicated E2E tab only when the discovery gate found a suite
+if [ "$E2E_PRESENT" = 1 ]; then
+  E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --no-focus)
+  E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
+  E2E_PANE_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
+  herdr pane rename "$E2E_PANE_ID" "e2e-tester"
+fi
 
 # Wait for interactive shell prompt before running launcher
 sleep 2
 
 herdr pane run "$PR_REV_PANE" "proclaude --model advanced-adaai"
-herdr pane run "$E2E_PANE_ID" "proclaude --model lite-adaai"
+PANES=("$PR_REV_PANE")
+if [ "$E2E_PRESENT" = 1 ]; then
+  herdr pane run "$E2E_PANE_ID" "proclaude --model lite-adaai"
+  PANES+=("$E2E_PANE_ID")
+fi
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
-for p in "$PR_REV_PANE" "$E2E_PANE_ID"; do
+for p in "${PANES[@]}"; do
   found=0
   for i in $(seq 1 15); do
     if herdr agent list | jq -e --arg p "$p" '.result.agents[]? | select(.pane_id == $p)' >/dev/null 2>&1; then
@@ -198,18 +206,18 @@ for p in "$PR_REV_PANE" "$E2E_PANE_ID"; do
 done
 
 herdr agent rename "$PR_REV_PANE" "pr-reviewer"
-herdr agent rename "$E2E_PANE_ID" "e2e-tester"
-
-# Confirm wrappers started
 herdr pane process-info "$PR_REV_PANE"
-herdr pane process-info "$E2E_PANE_ID"
+if [ "$E2E_PRESENT" = 1 ]; then
+  herdr agent rename "$E2E_PANE_ID" "e2e-tester"
+  herdr pane process-info "$E2E_PANE_ID"
+fi
 ```
 
-Start CI / validation, E2E testing, and PR review as early as possible and let them proceed concurrently against the draft PR. Do not impose a fixed review-first, test-first, or CI-first order. The manager dynamically chooses the next safe action based on severity, blocking impact, expected fix size, likely overlap with other findings, validation invalidation risk, CI duration, and whether the failure is patch-related or infrastructure-related.
+Start CI / validation, E2E testing (if present), and PR review as early as possible and let them proceed concurrently against the draft PR. Do not impose a fixed review-first, test-first, or CI-first order. The manager dynamically chooses the next safe action based on severity, blocking impact, expected fix size, likely overlap with other findings, validation invalidation risk, CI duration, and whether the failure is patch-related or infrastructure-related.
 
 **E2E Testing Protocol (`e2e-tester` in tab `e2e-<issue#>`):**
-- `e2e-tester` inspects the repository for End-to-End or system integration tests (e.g. Playwright, Cypress, Puppeteer, Selenium, `docker-compose.e2e.yml`, `compose.e2e.yml`, `npm run test:e2e`, `pytest tests/e2e`, etc.).
-- If the repository has NO E2E test manifests or scripts, `e2e-tester` reports that E2E tests are absent/skipped, settles into an idle state, and does not block PR readiness. For repos with no E2E suite, `skipped` is the expected result.
+- The manager discovers E2E suites before spawning this agent. If none exists, the manager records `skipped`; no E2E agent or tab is created and the skip does not block PR readiness.
+- When a suite is found, provide its paths and commands to `e2e-tester`.
 - If E2E test manifests or scripts exist, `e2e-tester` builds/starts necessary services, executes the E2E suite against the draft PR head, and captures exit codes and full logs. Label test containers with `e2e-${ISSUE_NUMBER}` and ensure `$TMPDIR` defaults to `/tmp`.
 - If E2E tests fail: `e2e-tester` collects complete failure traces, logs, and screenshots/reports, and provides the failure report to the main issue manager. The manager treats E2E failures as CI failures and routes them to `code-reviewer` via the batch CI diagnosis protocol.
 - `e2e-tester` cleans up any temporary containers, networks, or volumes created for testing. The `e2e-<issue#>` tab and pane remain open and idle for audit and debugging history.

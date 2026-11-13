@@ -39,7 +39,7 @@ HERDR TAB TOPOLOGY:
    |                                       | (Flock: m5)                      |
    +---------------------------------------+----------------------------------+
 
-4. Stage 3 Dedicated Tab: 'e2e-<issue#>'
+4. Stage 3 Dedicated Tab (only when E2E exists): 'e2e-<issue#>'
    +---------------------------------------------------------------------+
    | e2e-tester                                                          |
    | proclaude --model lite-adaai (Flock: m6)                            |
@@ -324,7 +324,15 @@ herdr tab rename "$IMPL_TAB_ID" "implementation-${ISSUE_NUMBER}"
 
 ## 6. Stage 3: Concurrent PR Review, E2E Testing, & CI
 
-Once the draft PR exists, validation proceeds concurrently across three dimensions:
+Once the draft PR exists, review, required CI, and E2E (only when present) proceed concurrently.
+
+### E2E discovery gate
+
+Before creating an E2E tab or agent, the Lead itself inspects the current PR head across the repository, including relevant monorepo packages: repository instructions and test documentation, CI workflows, package scripts and other build/test targets, test directories, framework configuration, and E2E or system-integration compose manifests. Examples include Playwright, Cypress, Puppeteer, Selenium, `docker-compose.e2e.yml`, `compose.e2e.yml`, `test:e2e`, `pytest tests/e2e`, and `make e2e`. Inspect candidates to distinguish actual suites or runnable commands from mere dependencies or incidental mentions; do not rely on one filename or tool.
+
+Record the head SHA and the evidence/paths and commands found. If no suite exists, record `E2E: skipped (no suite)` with the evidence and proceed without creating, launching, adopting, assigning, waiting for, or supervising an E2E tab or agent (`m6`). If discovery is inconclusive (for example, inaccessible files or ambiguous configuration), investigate or escalate rather than claim a skip. An existing but broken or unexecutable suite is not absent; treat it as a validation failure or blocker. A skip never substitutes for required CI or PR review.
+
+Repeat discovery for each new PR head, including after fixes and rebases. If a suite appears, create the agent and run it; if one remains, rerun it against the new head; if it disappears, record the new head's skip and do not wait on or start E2E work. Retain any previously spawned tab idle for audit.
 
 ### 1. Formal PR Review (`pr-reviewer` in Main Tab)
 ```bash
@@ -362,6 +370,8 @@ pc-tool flock send --to m5 --kind assign --ref "pr#${PR_NUMBER}" \
 **Review Self-Approval & Gate Rule:** If the reviewer identity is the author of the PR, GitHub disallows `APPROVE`; submit a `COMMENT` review stating that no actionable findings remain. The formal review gate is "no unresolved blocking, high, or medium actionable findings", not strictly "approved".
 
 ### 2. E2E Testing Protocol (`e2e-tester` in Tab `e2e-<issue#>`)
+
+Run this entire step only if the Lead's discovery gate found a suite; otherwise skip it. Write the identified paths, commands, and required task instructions to `/tmp/e2e-request-${ISSUE_NUMBER}.md` for the tester.
 ```bash
 E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
 E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab_id // .result.tab.tab_id')
@@ -403,11 +413,11 @@ herdr tab rename "$E2E_TAB_ID" "e2e-${ISSUE_NUMBER}"
 
 # One owner per ref: assign e2e:#${PR_NUMBER} to m6 (distinct ref from m5)
 pc-tool flock send --to m6 --kind assign --ref "e2e:#${PR_NUMBER}" \
-  --summary "Discover and run E2E / integration test suites"
+  --summary "Run discovered E2E / integration test suites" \
+  --body-file "/tmp/e2e-request-${ISSUE_NUMBER}.md"
 ```
-- `m6` inspects for Playwright, Cypress, `docker-compose.e2e.yml`, or `pytest tests/e2e`.
-- If absent: reports skipped via `--kind progress`. For repos with no E2E suite, `skipped` is the expected result and does not block PR readiness.
-- If present: runs headless suite with containers labeled `$FLOCK_DOCKER_LABEL` (defaults to `e2e-${ISSUE_NUMBER}`) and `$TMPDIR` default `/tmp`. Cleans up afterwards with `docker compose down -v`.
+- `m6` runs the identified headless suite with containers labeled `$FLOCK_DOCKER_LABEL` (defaults to `e2e-${ISSUE_NUMBER}`) and `$TMPDIR` default `/tmp`. Cleans up afterwards with `docker compose down -v`.
+- If no suite exists, the Lead records the skip directly; there is no `m6` report to await.
 
 ### 3. PR CI Discovery & Batch Diagnosis Protocol
 - If `.woodpecker/pr.yaml` exists, monitor pipeline. (Woodpecker CI is optional if no manifest exists).
@@ -427,7 +437,7 @@ pc-tool flock send --to m6 --kind assign --ref "e2e:#${PR_NUMBER}" \
   3. `m3` assigns fixes to coders; coders fix all issues in the batch; `m3` reviews and creates **exactly one** CI-fix commit and pushes **once**.
 
 ### 4. Readiness Transition
-- Once formal PR review, E2E tests, and required CI pass, convert the PR from draft to open:
+- Once formal PR review and required CI pass, and E2E passes if present (or is recorded as skipped if absent), convert the PR from draft to open:
   ```bash
   gh pr ready "$PR_NUMBER"
   ```
@@ -438,7 +448,7 @@ pc-tool flock send --to m6 --kind assign --ref "e2e:#${PR_NUMBER}" \
 
 ## 7. Stage 4: Post-Validation `origin/main` Rebase Gate
 
-After PR review, E2E tests, and CI checks pass on the latest head commit:
+After PR review and CI checks pass, and E2E passes if present (or is recorded as skipped if absent), on the latest head commit:
 1. Mark PR ready for review: `gh pr ready "$PR_NUMBER"`.
 2. Fetch default branch: `git fetch origin main`.
 3. Check divergence:
@@ -450,7 +460,7 @@ After PR review, E2E tests, and CI checks pass on the latest head commit:
    - Rebase feature branch onto `origin/main`.
    - Resolve conflicts semantically.
    - Force-push with lease: `git push --force-with-lease origin "$CURRENT_BRANCH"`.
-   - **Restart Stage 3:** Rerun review, E2E tests, and CI on the rebased head SHA.
+   - **Restart Stage 3:** Rediscover E2E for the rebased head; rerun review, CI, and E2E if present, or record E2E as skipped if absent.
 
 ---
 

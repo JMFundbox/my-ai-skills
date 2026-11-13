@@ -67,7 +67,7 @@ main issue manager
 │   ├── imp-coder-2 (optional)
 │   └── imp-coder-3 (optional)
 ├── pr-reviewer (Stage 3, main tab right pane)
-└── e2e-tester (Stage 3, dedicated e2e-<issue#> tab)
+└── e2e-tester (Stage 3, dedicated e2e-<issue#> tab; only when E2E exists)
 ```
 
 The main issue manager supervises `plan-reviewer`, `code-reviewer`, `pr-reviewer`, and `e2e-tester`. `plan-reviewer` supervises `imp-planner`. `code-reviewer` supervises `imp-coder-*` agents. Delegation does not transfer ownership.
@@ -327,7 +327,7 @@ The manager monitors the implementation tab passively. It does NOT review diffs 
 +--------------------------+--------------------------+
 ```
 
-**Dedicated E2E tab (`e2e-<issue#>`):**
+**Dedicated E2E tab (`e2e-<issue#>`, only when a suite exists):**
 ```text
 +-----------------------------------------------------+
 | e2e-tester                                          |
@@ -340,35 +340,49 @@ The implementation tab with `code-reviewer` remains open and on standby.
 
 ### Adaptive review, E2E testing, and CI prioritization
 
-Start CI, E2E testing, and PR review concurrently against the draft PR. Do not force review-first, test-first, or CI-first ordering. The main issue manager chooses the next safe action using severity, blocking impact, expected fix size, likely shared root cause, chance of invalidating in-progress validation, CI duration, and failure classification.
+Start CI, E2E testing (if present), and PR review concurrently against the draft PR. Do not force review-first, test-first, or CI-first ordering. The main issue manager chooses the next safe action using severity, blocking impact, expected fix size, likely shared root cause, chance of invalidating in-progress validation, CI duration, and failure classification.
 
 Prefer an immediate CI or E2E correction when it reveals a fundamental compile, typecheck, startup, security, data-integrity, migration, or compatibility problem, or when it makes meaningful review impossible. Prefer a review correction when it is high impact, small and safe, likely to resolve CI/test failures, or likely to make a long-running CI/test result stale. Continue investigation instead of changing code when evidence suggests flakiness, infrastructure failure, ambiguity, or imminent decisive output.
 
 After every pushed code change, re-evaluate all sources against the new head SHA. Results from older commits are historical only. Use only checks, E2E results, and review outcomes associated with the same latest commit for completion.
 
+### E2E discovery gate
+
+Before creating an E2E tab or agent, the manager itself inspects the current PR head across the repository, including relevant monorepo packages: repository instructions and test documentation, CI workflows, package scripts and other build/test targets, test directories, framework configuration, and E2E or system-integration compose manifests. Examples include Playwright, Cypress, Puppeteer, Selenium, `docker-compose.e2e.yml`, `compose.e2e.yml`, `test:e2e`, `pytest tests/e2e`, and `make e2e`. Inspect candidates to distinguish actual suites or runnable commands from mere dependencies or incidental mentions; do not rely on one filename or tool.
+
+Record the head SHA and the evidence/paths and commands found. Set `E2E_PRESENT=1` when a suite or explicit E2E/system integration test command exists. Set `E2E_PRESENT=0` only when discovery confirms none exists: record `E2E: skipped (no suite)` with the evidence and proceed without creating, launching, adopting, assigning, waiting for, or supervising an E2E tab or agent. If discovery is inconclusive (for example, inaccessible files or ambiguous configuration), investigate or escalate rather than claim a skip. An existing but broken or unexecutable suite is not absent; treat it as a validation failure or blocker.
+
+Repeat discovery for each new PR head, including after fixes and rebases. If a suite appears, create the agent and run it; if one remains, rerun it against the new head; if it disappears, record the new head's skip and do not wait on or start E2E work. Retain any previously spawned tab idle for audit. A skip never substitutes for required CI or PR review.
+
 ### E2E testing protocol (`e2e-tester` in tab `e2e-<issue#>`)
 
-In Stage 3, the manager spawns `pr-reviewer` in the main tab (right pane) and `e2e-tester` in a dedicated Herdr tab `e2e-<issue#>` inside the current workspace:
+In Stage 3, the manager spawns `pr-reviewer` in the main tab (right pane), and only when `E2E_PRESENT=1` spawns `e2e-tester` in a dedicated Herdr tab `e2e-<issue#>` inside the current workspace:
 
 ```bash
 # 1. Main tab: split right for pr-reviewer
 PR_REV_PANE=$(herdr pane split "$PARENT_PANE_ID" --direction right --no-focus | jq -r '.result.pane_id // .result.pane.pane_id')
 herdr pane rename "$PR_REV_PANE" "pr-reviewer"
 
-# 2. Dedicated tab: e2e-<issue#>
-E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --no-focus)
-E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
-E2E_PANE_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
-herdr pane rename "$E2E_PANE_ID" "e2e-tester"
+# 2. Dedicated tab only if discovery found an E2E suite
+if [ "$E2E_PRESENT" = 1 ]; then
+  E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --no-focus)
+  E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
+  E2E_PANE_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.root_pane.pane_id // .result.pane_id')
+  herdr pane rename "$E2E_PANE_ID" "e2e-tester"
+fi
 
 # Wait for interactive shell prompt before running launcher
 sleep 2
 
 herdr pane run "$PR_REV_PANE" "proclaude --model advanced-adaai"
-herdr pane run "$E2E_PANE_ID" "proclaude --model lite-adaai"
+PANES=("$PR_REV_PANE")
+if [ "$E2E_PRESENT" = 1 ]; then
+  herdr pane run "$E2E_PANE_ID" "proclaude --model lite-adaai"
+  PANES+=("$E2E_PANE_ID")
+fi
 
 # Wait for agent to occupy each pane (bounded: at most 15 checks, 2s apart)
-for p in "$PR_REV_PANE" "$E2E_PANE_ID"; do
+for p in "${PANES[@]}"; do
   found=0
   for i in $(seq 1 15); do
     if herdr agent list | jq -e --arg p "$p" '.result.agents[]? | select(.pane_id == $p)' >/dev/null 2>&1; then
@@ -385,16 +399,16 @@ for p in "$PR_REV_PANE" "$E2E_PANE_ID"; do
 done
 
 herdr agent rename "$PR_REV_PANE" "pr-reviewer"
-herdr agent rename "$E2E_PANE_ID" "e2e-tester"
-
-# Confirm wrappers started
 herdr pane process-info "$PR_REV_PANE"
-herdr pane process-info "$E2E_PANE_ID"
+if [ "$E2E_PRESENT" = 1 ]; then
+  herdr agent rename "$E2E_PANE_ID" "e2e-tester"
+  herdr pane process-info "$E2E_PANE_ID"
+fi
 ```
 
 1. **Manifest discovery:**
-   - `e2e-tester` inspects the repository for End-to-End or system integration tests, browser test suites, or test compose files (e.g., `playwright.config.*`, `cypress.config.*`, `cypress.json`, `puppeteer`, `selenium`, `docker-compose.e2e.yml`, `compose.e2e.yml`, `npm run test:e2e`, `pytest tests/e2e`, `make e2e`).
-   - If no E2E manifests or test commands exist in the repository, `e2e-tester` records that E2E testing is absent/skipped, enters an idle state, and reports this to the manager. For repos with no E2E suite, `skipped` is the expected result and does not block PR readiness.
+   - The manager completes the discovery gate before spawning any E2E agent and supplies the identified paths and commands to the tester.
+   - If no suite exists, the manager records the skip directly; no tester or E2E tab is created or awaited.
 
 2. **Test execution:**
    - If an E2E suite is found, `e2e-tester` spins up necessary dependencies/containers, executes the tests against the draft PR head commit, and records output. Label containers with `e2e-${ISSUE_NUMBER}` and ensure `$TMPDIR` defaults to `/tmp`.
@@ -547,7 +561,7 @@ A rebase creates a new PR head SHA. All earlier CI and formal-review results bec
 
 After pushing the rebased branch:
 
-1. Restart CI / validation, E2E testing, and PR review concurrently for the new head.
+1. Repeat the E2E discovery gate for the new head; restart CI / validation, PR review, and E2E testing if present concurrently.
 2. Require `pr-reviewer` to perform a fresh full review of the complete rebased PR, not only the conflict resolutions or new upstream commits.
 3. Require a new formal GitHub review for the new head.
 4. Run all required CI checks (or CI compose container validation if Woodpecker PR CI is absent/optional) and E2E tests (if present in repo) for the new head.

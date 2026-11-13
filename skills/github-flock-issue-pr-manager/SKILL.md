@@ -1,6 +1,6 @@
 ---
 name: github-flock-issue-pr-manager
-description: Manage a GitHub issue through planning, implementation, independent review, PR publication, and passing CI using supervised Herdr agents coordinated via Flock. Preserves the exact Herdr tab and pane topologies of /github-issue-pr-manager (planning-<issue#>, implementation-<issue#>, main tab pr-reviewer, e2e-<issue#>) while using Flock's SQLite turn bus and verified wakes for inter-agent communication.
+description: Manage a GitHub issue through planning, implementation, independent review, PR publication, and passing CI using supervised Herdr agents coordinated via Flock. Matches /github-issue-pr-manager's tab and pane topologies, creating an E2E tab only when the repository has E2E tests.
 ---
 
 # GitHub Issue PR Manager (Flock-Powered)
@@ -44,7 +44,7 @@ HERDR TAB TOPOLOGY:
    |                                       | (Flock: m5)                      |
    +---------------------------------------+----------------------------------+
 
-4. Stage 3 Dedicated Tab: 'e2e-<issue#>'
+4. Stage 3 Dedicated Tab (only when E2E exists): 'e2e-<issue#>'
    +---------------------------------------------------------------------+
    | e2e-tester                                                          |
    | proclaude --model lite-adaai (Flock: m6)                            |
@@ -321,6 +321,8 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
 
 ### Stage 3: PR Review, E2E Testing, & CI
 
+Before any E2E tab, agent, or Flock member is created, the Lead performs the [E2E discovery gate](references/orchestration.md#e2e-discovery-gate) on the current PR head. If no suite exists, record E2E as skipped with evidence and do not create, launch, adopt, assign, wait for, or supervise `e2e-tester` / `m6`. Continue PR review and required CI independently. Repeat discovery on each new head, including after fixes and rebases.
+
 1. **Spawn `pr-reviewer` in Main Tab**:
    ```bash
    PR_REV_PANE=$(herdr pane split "$PARENT_PANE_ID" --direction right --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus | jq -r '.result.pane_id // .result.pane.pane_id')
@@ -348,7 +350,7 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
 
    pc-tool flock adopt --pane "$PR_REV_PANE" --name m5
    ```
-2. **Spawn Dedicated Tab `e2e-<issue#>` & Restore Canonical Tab Label (POST-JOIN)**:
+2. **Only if the discovery gate found a suite:** spawn dedicated tab `e2e-<issue#>` and restore its canonical label (POST-JOIN). Otherwise skip this entire step:
    ```bash
    E2E_TAB_JSON=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "e2e-${ISSUE_NUMBER}" --env "FLOCK_DOCKER_LABEL=$FLOCK_DOCKER_LABEL" --env "TMPDIR=$FLOCK_TMPDIR" --no-focus)
    E2E_TAB_ID=$(echo "$E2E_TAB_JSON" | jq -r '.result.tab.tab_id // .result.tab_id')
@@ -395,13 +397,14 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
        pc-tool flock send --to m5 --kind assign --ref "pr#${PR_NUMBER}" \
          --summary "Conduct formal PR review with inline comments"
        ```
-     - Lead assigns E2E tests to `m6` (`e2e-tester`) with ref `e2e:#${PR_NUMBER}`:
+     - Only when a suite exists, Lead writes the discovered paths, commands, and required task instructions to `/tmp/e2e-request-${ISSUE_NUMBER}.md` and assigns E2E tests to `m6` (`e2e-tester`) with ref `e2e:#${PR_NUMBER}`:
        ```bash
        pc-tool flock send --to m6 --kind assign --ref "e2e:#${PR_NUMBER}" \
-         --summary "Discover and run E2E / integration test suites"
+         --summary "Run discovered E2E / integration test suites" \
+         --body-file "/tmp/e2e-request-${ISSUE_NUMBER}.md"
        ```
    - **Review Self-Approval & Gate Rule:** `m5` inspects diff and submits formal review on GitHub with inline comments. If the reviewer identity is the author of the PR, GitHub disallows `APPROVE`; submit a `COMMENT` review stating that no actionable findings remain. The formal review gate is "no unresolved blocking, high, or medium actionable findings", not strictly "approved".
-   - **E2E Testing:** `m6` inspects repo for Playwright/Cypress/Compose E2E suites, runs tests, and cleans up containers labeled `$FLOCK_DOCKER_LABEL` (defaults to `e2e-${ISSUE_NUMBER}`). If the repo has no E2E suite, `skipped` is the expected result and does not block PR readiness.
+   - **E2E Testing:** If a suite exists, `m6` runs it and cleans up containers labeled `$FLOCK_DOCKER_LABEL` (defaults to `e2e-${ISSUE_NUMBER}`). Otherwise the Lead records `skipped` without spawning `m6`; this does not block PR readiness.
    - **CI Monitoring & Woodpecker 401 / 403:**
      - Lead monitors required CI checks via `gh pr checks "$PR_NUMBER"` and Woodpecker CI.
      - If `wpci` returns `HTTP 401` or `HTTP 403: User not authorized` and pipeline logs cannot be retrieved via CLI:
@@ -420,7 +423,7 @@ All inter-agent communication flows through Flock's SQLite turn bus (`pc-tool fl
 
 ### Stage 4: Post-Validation `origin/main` Rebase Gate
 
-Once formal PR review, E2E tests, and required CI all pass on the latest head commit and the PR is marked ready for review:
+Once formal PR review, E2E tests (if present; otherwise recorded as skipped), and required CI all pass on the latest head commit and the PR is marked ready for review:
 1. Fetch default branch: `git fetch origin main` (or `staging` as applicable).
 2. Check divergence:
    ```bash
@@ -430,7 +433,7 @@ Once formal PR review, E2E tests, and required CI all pass on the latest head co
    - Rebase feature branch onto the target base branch.
    - Resolve conflicts semantically.
    - Force-push with lease: `git push --force-with-lease origin "$CURRENT_BRANCH"`.
-   - **Restart Stage 3:** Rerun review, E2E tests, and CI on the rebased head SHA.
+   - **Restart Stage 3:** Rediscover E2E for the rebased head; rerun review, CI, and E2E if present, or record E2E as skipped if absent.
 
 ### Stage 5: Teardown, Cleanup, & Finish
 
@@ -445,4 +448,4 @@ Finish only when PR is open (ready for review), CI is green, reviews are clean, 
    ```bash
    pc-tool flock close
    ```
-3. Output the single completion report to the user (branch, PR URL, head SHA, review outcome, test/CI results). All Herdr tabs remain open for inspection.
+3. Output the single completion report to the user (branch, PR URL, head SHA, review outcome, test/CI results, and E2E result or skip with evidence). All spawned Herdr tabs remain open for inspection.
