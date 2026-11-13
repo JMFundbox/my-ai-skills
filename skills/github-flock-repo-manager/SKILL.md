@@ -91,11 +91,16 @@ Per dispatch, derive: kind, number, branch (the lead may rename it, but keeps th
 
 The only non-derivable state is *what the manager already told an agent* — the `(headSha, baseSha)` of the last divergence notice per PR. Keep it in the conversation; if lost, the worst outcome is one repeated notice.
 
-## Monitor
+## Monitor (mandatory worktree watch)
 
-Run a cycle after each user message, and on a timer when the harness offers one (for example `/loop`, a scheduled wakeup, or a monitor). Use roughly 3–5 minute spacing and skip the first check for a few minutes after a dispatch; these agents run for a long time. Between cycles, wait for the user. Do not busy-poll.
+You must continuously monitor your dispatched Herdr worktrees; sitting idle while dispatches are live is a violation.
 
-Each cycle is cheap-first: one `herdr agent list`, one repo-wide `gh pr list --state open --json …`, then per-PR calls only for PRs that are ready. Re-apply the `admin-<N>` tab name on each dispatch's first tab if the lead renamed it (cosmetic; skip if the tab was closed). Classify each dispatch:
+- Run a cycle after each user message, and on a timer when the harness offers one (for example `/loop`, a scheduled wakeup, or a monitor). Use roughly 3–5 minute spacing and skip the first check for a few minutes after a dispatch; these agents run for a long time. Between cycles, never busy-poll.
+- Every cycle is worktree-first and cheap-first: `herdr worktree list` → re-derive dispatches (workspace label or slugged branch; never the tab name) → one `herdr agent list` → one repo-wide `gh pr list --state open --json …` → per-PR calls only for PRs that are ready. Re-apply the `admin-<N>` tab name on each dispatch's first tab if the lead renamed it (cosmetic; skip if the tab was closed). Detect worktree disappearance, workspace changes, or branch/path drift; Herdr plus GitHub is the source of truth, never a cached table or a lead's chat message.
+- If live dispatches exist and no timer drives cycles, keep a background monitor shell running: an ordinary Herdr pane labelled `monitor` in your own workspace (`--no-focus`), running only the read-only watch loop from the reference. Whenever you would otherwise sit idle with live dispatches and neither a timer nor a live monitor shell exists, creating the monitor shell is mandatory, not optional. Recheck it each cycle and recreate it if dead. It observes only and must never run any `pc-tool flock` state-changing verb; every merge, divergence-notice, redispatch, and cleanup decision stays in this manager turn.
+- If a timer drives cycles, the background shell is optional, but worktree-first polling on every cycle is still mandatory.
+
+Classify each dispatch:
 
 | Observation | Action |
 |---|---|
@@ -158,7 +163,7 @@ Record `(headSha, baseSha)`. Do not resend until the head changes. If the lead g
 
 For a merged PR, report: kind and number, PR URL, merge method, merge commit, base, and whether the issue closed. For a status request, print one table: `#`, kind, base, agent state, PR (number + draft/ready), merge status, last action.
 
-If the user says to stop, stop monitoring and leave all worktrees and agents running; say which are still active.
+If the user says to stop, close only the `monitor` pane you created, stop monitoring, and leave all worktrees, leads, and flock members running; say which are still active.
 
 ## Guardrails
 

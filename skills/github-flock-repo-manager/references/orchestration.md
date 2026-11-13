@@ -174,6 +174,44 @@ gh pr list --state open --json number,headRefName,baseRefName,headRefOid,isDraft
 
 PRs for dispatches that are no longer open: `gh pr list --state merged --head "<branch>" --json number,mergedAt,mergeCommit`.
 
+### Background monitor shell (mandatory when idle with no timer)
+
+When live dispatches exist and no timer (`/loop`, scheduled wakeup, monitor) drives cycles, the manager must keep one ordinary Herdr pane labelled `monitor` running a read-only watch loop. It observes only: `herdr worktree list`, `herdr agent list`, and repo-wide `gh` PR state. It must never merge, prompt leads, edit/commit/push code, run tests in a dispatch worktree, close worktrees, answer permission prompts, or run any `pc-tool flock` state-changing verb. A read-only `flock status` look is allowed only as corroboration, never as a gate. All decisions stay in the manager turn, which re-reads Herdr/GitHub itself before acting.
+
+```bash
+# Prints the monitor pane id in the manager workspace, or nothing.
+monitor_pane() {
+  herdr pane list --workspace "$MANAGER_WORKSPACE_ID" --json |
+    jq -r '.result.panes[]? | select((.label // .name) == "monitor") | .pane_id' | head -n1
+}
+
+# Starts the read-only watch loop if it is missing or dead. Prints the pane id.
+# usage: ensure_monitor_shell <log-file>
+ensure_monitor_shell() {
+  local log="$1" pane tab root
+  pane="$(monitor_pane)"
+  if [ -n "$pane" ] && herdr pane process-info "$pane" >/dev/null 2>&1; then
+    echo "$pane"
+    return 0
+  fi
+  tab="$(herdr tab create --workspace "$MANAGER_WORKSPACE_ID" --cwd "$PWD" --label monitor --no-focus --json | jq -r '.result.tab.tab_id // .result.tab_id')"
+  root="$(herdr tab list --workspace "$MANAGER_WORKSPACE_ID" --json | jq -r --arg t "$tab" '.result.tabs[]? | select(.tab_id == $t) | .root_pane.pane_id // empty')"
+  pane="${root:-$(herdr pane list --workspace "$MANAGER_WORKSPACE_ID" --json | jq -r '.result.panes[0].pane_id')}"
+  herdr pane rename "$pane" "monitor"
+  sleep 2
+  herdr pane run "$pane" "LOG='$log'; while true; do echo \"=== \$(date -u +%FT%TZ) ===\" >>\"\$LOG\" 2>&1; herdr worktree list --json 2>&1 | jq -c '.result.worktrees[]? | {branch, path, open_workspace_id}' >>\"\$LOG\" 2>&1; herdr agent list --json 2>&1 | jq -c '.result.agents[]? | {name, pane_id}' >>\"\$LOG\" 2>&1; gh pr list --state open --json number,headRefName,headRefOid,isDraft,mergeable,mergeStateStatus >>\"\$LOG\" 2>&1; sleep 240; done"
+  echo "$pane"
+}
+
+# Liveness check each manager cycle; recreate when dead.
+# pane="$(monitor_pane)"; herdr pane process-info "$pane" >/dev/null 2>&1 || pane="$(ensure_monitor_shell "$MONITOR_LOG")"
+
+# Stop only the monitor you created when the user says to stop monitoring:
+# herdr pane close "$(monitor_pane)"
+```
+
+Set `MONITOR_LOG` once per session (for example `/tmp/repo-manager-monitor-<slug>.log`), reuse it across cycles, and read its tail instead of re-polling panes in a tight loop. Closing the monitor never closes dispatch worktrees, tabs, leads, or flock members.
+
 ## 6. Merge gate helpers
 
 ```bash
