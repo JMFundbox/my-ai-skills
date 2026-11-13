@@ -51,10 +51,21 @@ resolve_base() {
 
 ## 4. Dispatch
 
+### Issue kind classification
+
+Before calling `dispatch_one`, independently inspect the requested GitHub issue's type, labels, body, and native sub-issues (including all pages when needed). Use the GitHub API or `gh` fields available on the host; distinguish an empty sub-issue list from an API/authentication error. Where a particular metadata feature is unsupported, use the available issue data and repository conventions rather than treating unsupported as a positive or a retrieval failure. If required available data cannot be read, report the error and skip the dispatch; never silently treat a failed lookup as an empty list.
+
+Classify as `epic` when the user explicitly describes it as an epic, or the issue has an Epic type, `epic`/`umbrella` label, at least one native sub-issue, a task list with two or more issue references, or an explicit epic/umbrella description covering other issues. Otherwise, after successful inspection, default to `issue`. “Issue #N” alone does not override epic evidence. A specific request to use a named manager or to treat the item as a non-epic overrides automatic classification. Do not ask the user to choose a manager because the kind is ambiguous. Announce the chosen kind in the normal dispatch report.
+
+Examples: `work issue #20` with an epic label or native sub-issue → `epic`; `work #21` with no epic evidence → `issue`; `use /github-flock-issue-pr-manager for #20` → `issue` even if it is an epic.
+
+### Dispatch command
+
 ```bash
 # usage: dispatch_one <issue|epic> <number> <base>
 dispatch_one() {
   local kind="$1" n="$2" base="$3"
+  case "$kind" in issue|epic) ;; *) echo "ERROR: invalid dispatch kind: $kind" >&2; return 1 ;; esac
   local title slug branch label skill goal
   title="$(gh issue view "$n" --json title -q .title)"
   slug="$(slugify "$title")"
